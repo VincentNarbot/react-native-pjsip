@@ -1,13 +1,48 @@
-'use strict';
-
-import React, {
-    DeviceEventEmitter,
-    NativeModules,
-} from 'react-native';
+import React, {DeviceEventEmitter, NativeModules} from 'react-native';
 import {EventEmitter} from 'events'
 
 import Call from './Call'
+import Message from './Message'
 import Account from './Account'
+
+/**
+ * SIP headers object, where each key is a header name and value is a header value.
+ * Example:
+ * {
+ *   "X-Custom-Header": "Test Header Value",
+ *   "X-Custom-ID": "Awesome Header"
+ * }
+ *
+ * @typedef {Object} PjSipHdrList
+ */
+
+/**
+ * An additional information to be sent with outgoing SIP message.
+ * It can (optionally) be specified for example
+ * with #Endpoint.makeCall(), #Endpoint.answerCall(), #Endpoint.hangupCall(),
+ * #Endpoint.holdCall() and many more.
+ *
+ * @typedef {Object} PjSipMsgData
+ * @property {String} target_uri - Indicates whether the Courage component is present.
+ * @property {PjSipHdrList} hdr_list - Additional message headers as linked list.
+ * @property {String} content_type - MIME type of optional message body.
+ * @property {String} msg_body - MIME type of optional message body.
+ */
+
+/**
+ * An additional information to be sent with outgoing SIP message.
+ * It can (optionally) be specified for example
+ * with #Endpoint.makeCall(), #Endpoint.answerCall(), #Endpoint.hangupCall(),
+ * #Endpoint.holdCall() and many more.
+ *
+ * @typedef {Object} PjSipCallSetttings
+ * @property {number} flag - Bitmask of #pjsua_call_flag constants.
+ * @property {number} req_keyframe_method - This flag controls what methods to request keyframe are allowed on the call.
+ * @property {number} aud_cnt - Number of simultaneous active audio streams for this call. Setting this to zero will disable audio in this call.
+ * @property {number} vid_cnt - Number of simultaneous active video streams for this call. Setting this to zero will disable video in this call.
+ */
+
+
 
 export default class Endpoint extends EventEmitter {
 
@@ -22,6 +57,7 @@ export default class Endpoint extends EventEmitter {
         DeviceEventEmitter.addListener('pjSipCallChanged', this._onCallChanged.bind(this));
         DeviceEventEmitter.addListener('pjSipCallTerminated', this._onCallTerminated.bind(this));
         DeviceEventEmitter.addListener('pjSipCallScreenLocked', this._onCallScreenLocked.bind(this));
+        DeviceEventEmitter.addListener('pjSipMessageReceived', this._onMessageReceived.bind(this));
         DeviceEventEmitter.addListener('pjSipConnectivityChanged', this._onConnectivityChanged.bind(this));
     }
 
@@ -126,9 +162,6 @@ export default class Endpoint extends EventEmitter {
     createAccount(configuration) {
         return new Promise(function(resolve, reject) {
             NativeModules.PjSipModule.createAccount(configuration, (successful, data) => {
-
-                console.log("createAccount response", successful, data);
-
                 if (successful) {
                     resolve(new Account(data));
                 } else {
@@ -140,6 +173,27 @@ export default class Endpoint extends EventEmitter {
 
     replaceAccount(account, configuration) {
         throw new Error("Not implemented");
+    }
+
+    /**
+     * Update registration or perform unregistration.
+     * If registration is configured for this account, then initial SIP REGISTER will be sent when the account is added.
+     * Application normally only need to call this function if it wants to manually update the registration or to unregister from the server.
+     *
+     * @param {Account} account
+     * @param bool renew If renew argument is zero, this will start unregistration process.
+     * @returns {Promise}
+     */
+    registerAccount(account, renew = true) {
+        return new Promise(function(resolve, reject) {
+            NativeModules.PjSipModule.registerAccount(account.getId(), renew, (successful, data) => {
+                if (successful) {
+                    resolve(data);
+                } else {
+                    reject(data);
+                }
+            });
+        });
     }
 
     /**
@@ -161,16 +215,22 @@ export default class Endpoint extends EventEmitter {
     }
 
     /**
-     * Make outgoing call to the specified URI.
+     * Make an outgoing call to the specified URI.
+     * Available call settings:
+     * - audioCount - Number of simultaneous active audio streams for this call. Setting this to zero will disable audio in this call.
+     * - videoCount - Number of simultaneous active video streams for this call. Setting this to zero will disable video in this call.
+     * -
      *
      * @param account {Account}
      * @param destination {String} Destination SIP URI.
+     * @param callSettings {PjSipCallSetttings} Outgoing call settings.
+     * @param msgSettings {PjSipMsgData} Outgoing call additional information to be sent with outgoing SIP message.
      */
-    makeCall(account, destination) {
+    makeCall(account, destination, callSettings, msgData) {
         destination = this._normalize(account, destination);
 
         return new Promise(function(resolve, reject) {
-            NativeModules.PjSipModule.makeCall(account.getId(), destination, (successful, data) => {
+            NativeModules.PjSipModule.makeCall(account.getId(), destination, callSettings, msgData, (successful, data) => {
                 if (successful) {
                     resolve(new Call(data));
                 } else {
@@ -421,6 +481,58 @@ export default class Endpoint extends EventEmitter {
         });
     }
 
+    activateAudioSession() {
+        return new Promise((resolve, reject) => {
+            NativeModules.PjSipModule.activateAudioSession((successful, data) => {
+                if (successful) {
+                    resolve(data);
+                } else {
+                    reject(data);
+                }
+            });
+        });
+    }
+
+    deactivateAudioSession() {
+        return new Promise((resolve, reject) => {
+            NativeModules.PjSipModule.deactivateAudioSession((successful, data) => {
+                if (successful) {
+                    resolve(data);
+                } else {
+                    reject(data);
+                }
+            });
+        });
+    }
+
+    changeOrientation(orientation) {
+      const orientations = [
+        'PJMEDIA_ORIENT_UNKNOWN',
+        'PJMEDIA_ORIENT_ROTATE_90DEG',
+        'PJMEDIA_ORIENT_ROTATE_270DEG',
+        'PJMEDIA_ORIENT_ROTATE_180DEG',
+        'PJMEDIA_ORIENT_NATURAL'
+      ]
+
+      if (orientations.indexOf(orientation) === -1) {
+        throw new Error(`Invalid ${JSON.stringify(orientation)} device orientation, but expected ${orientations.join(", ")} values`)
+      }
+
+      NativeModules.PjSipModule.changeOrientation(orientation)
+    }
+
+    changeCodecSettings(codecSettings) {
+        return new Promise(function(resolve, reject) {
+        NativeModules.PjSipModule.changeCodecSettings(codecSettings, (successful, data) => {
+                if (successful) {
+                    resolve(data);
+                } else {
+                    reject(data);
+                }
+            });
+        });
+    }
+
     /**
      * @fires Endpoint#connectivity_changed
      * @private
@@ -457,8 +569,6 @@ export default class Endpoint extends EventEmitter {
      * @param data {Object}
      */
     _onCallReceived(data) {
-
-
         /**
          * TODO
          *
@@ -511,6 +621,21 @@ export default class Endpoint extends EventEmitter {
          * @property bool lock
          */
         this.emit("call_screen_locked", lock);
+    }
+
+    /**
+     * @fires Endpoint#message_received
+     * @private
+     * @param data {Object}
+     */
+    _onMessageReceived(data) {
+        /**
+         * TODO
+         *
+         * @event Endpoint#message_received
+         * @property {Message} message
+         */
+        this.emit("message_received", new Message(data));
     }
 
     /**

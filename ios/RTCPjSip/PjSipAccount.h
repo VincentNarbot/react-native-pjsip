@@ -11,19 +11,24 @@
 @property NSString * password;
 @property NSString * proxy;
 @property NSString * transport;
+
+@property NSString * contactParams;
+@property NSString * contactUriParams;
+
+
 @property NSString * regServer;
 @property NSNumber * regTimeout;
-
-
+@property NSDictionary * regHeaders;
+@property NSString * regContactParams;
+@property bool regOnAdd;
 
 + (instancetype)itemConfig:(NSDictionary *)config;
 
 - (id)initWithConfig:(NSDictionary *)config;
-// -(void) change: (NSDictionary *) configuration;
-
 - (int)id;
 
-- (PjSipCall *)makeCall:(NSString *)destination;
+- (PjSipCall *) makeCall: (NSString *) destination;
+- (void) register: (bool) renew;
 
 - (NSDictionary *)toJsonDictionary;
 

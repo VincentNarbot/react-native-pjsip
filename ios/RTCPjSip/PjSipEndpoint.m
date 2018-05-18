@@ -1,11 +1,14 @@
 @import AVFoundation;
 
 #import <React/RCTBridge.h>
+#import <React/RCTConvert.h>
 #import <React/RCTEventDispatcher.h>
 #import <React/RCTUtils.h>
 #import <VialerPJSIP/pjsua.h>
 
+#import "PjSipUtil.h"
 #import "PjSipEndpoint.h"
+#import "PjSipMessage.h"
 
 @implementation PjSipEndpoint
 
@@ -31,7 +34,7 @@
     if (status != PJ_SUCCESS) {
         NSLog(@"Error in pjsua_create()");
     }
-
+    
     // Init pjsua
     {
         // Init the config structure
@@ -43,6 +46,11 @@
         cfg.cb.on_incoming_call = &onCallReceived;
         cfg.cb.on_call_state = &onCallStateChanged;
         cfg.cb.on_call_media_state = &onCallMediaStateChanged;
+        cfg.cb.on_call_media_event = &onCallMediaEvent;
+        
+        cfg.cb.on_pager2 = &onMessageReceived;
+        
+        // on_call_video_state
         
 //        cfg.cfg.cb.on_call_media_state = &on_call_media_state;
 //        cfg.cfg.cb.on_incoming_call = &on_incoming_call;
@@ -63,6 +71,8 @@
 //        cfg.cfg.cb.on_ice_transport_error = &on_ice_transport_error;
 //        cfg.cfg.cb.on_snd_dev_operation = &on_snd_dev_operation;
 //        cfg.cfg.cb.on_call_media_event = &on_call_media_event;
+        
+        // pjsua_vid_enum_wins(<#pjsua_vid_win_id *wids#>, <#unsigned int *count#>)
 
         // Init the logging config structure
         pjsua_logging_config log_cfg;
@@ -87,21 +97,46 @@
         // Init transport config structure
         pjsua_transport_config cfg;
         pjsua_transport_config_default(&cfg);
+        pjsua_transport_id id;
 
         // Add TCP transport.
-        status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &cfg, NULL);
-        if (status != PJ_SUCCESS) NSLog(@"Error creating transport");
+        status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &cfg, &id);
+        
+        if (status != PJ_SUCCESS) {
+            NSLog(@"Error creating UDP transport");
+        } else {
+            self.udpTransportId = id;
+        }
     }
-
+    
     // Add TCP transport.
     {
-        // Init transport config structure
         pjsua_transport_config cfg;
         pjsua_transport_config_default(&cfg);
-
-        // Add TCP transport.
-        status = pjsua_transport_create(PJSIP_TRANSPORT_TCP, &cfg, NULL);
-        if (status != PJ_SUCCESS) NSLog(@"Error creating transport");
+        pjsua_transport_id id;
+        
+        status = pjsua_transport_create(PJSIP_TRANSPORT_TCP, &cfg, &id);
+        
+        if (status != PJ_SUCCESS) {
+            NSLog(@"Error creating TCP transport");
+        } else {
+            self.tcpTransportId = id;
+        }
+    }
+    
+    // Add TLS transport.
+    {
+        pjsua_transport_config cfg;
+        pjsua_transport_config_default(&cfg);
+        pjsua_transport_id id;
+        
+        status = pjsua_transport_create(PJSIP_TRANSPORT_TLS, &cfg, &id);
+        
+        if (status != PJ_SUCCESS) {
+            NSLog(@"Error creating TLS transport");
+        } else {
+            self.tlsTransportId = id;
+        }
     }
 
     // Initialization is done, now start pjsua
@@ -151,13 +186,19 @@
 
 #pragma mark Calls
 
--(PjSipCall *)makeCall:(PjSipAccount *) account destination:(NSString *)destination {
+-(PjSipCall *) makeCall:(PjSipAccount *) account destination:(NSString *)destination callSettings: (NSDictionary *)callSettingsDict msgData: (NSDictionary *)msgDataDict {
+    pjsua_call_setting callSettings;
+    [PjSipUtil fillCallSettings:&callSettings dict:callSettingsDict];
+
+    pjsua_msg_data msgData;
+    [PjSipUtil fillMsgData:&msgData dict:msgDataDict];
+    
     pjsua_call_id callId;
     pj_str_t callDest = pj_str((char *) [destination UTF8String]);
-    pjsua_msg_data callMsg;
-    pjsua_msg_data_init(&callMsg);
 
-    pj_status_t status = pjsua_call_make_call(account.id, &callDest, NULL, NULL, &callMsg, &callId);
+    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayAndRecord error:nil];
+   
+    pj_status_t status = pjsua_call_make_call(account.id, &callDest, &callSettings, NULL, &msgData, &callId);
     if (status != PJ_SUCCESS) {
         [NSException raise:@"Failed to make a call" format:@"See device logs for more details."];
     }
@@ -170,6 +211,21 @@
 
 - (PjSipCall *) findCall: (int) callId {
     return self.calls[@(callId)];
+}
+
+-(void) pauseParallelCalls:(PjSipCall*) call {
+    for(id key in self.calls) {
+        if (key != call.id) {
+            for (NSString *key in self.calls) {
+                PjSipCall *parallelCall = self.calls[key];
+                
+                if (call.id != parallelCall.id && !parallelCall.isHeld) {
+                    [parallelCall hold];
+                    [self emmitCallChanged:parallelCall];
+                }
+            }
+        }
+    }
 }
 
 -(void)useSpeaker {
@@ -196,6 +252,38 @@
     }
 }
 
+#pragma mark - Settings
+
+-(void) changeOrientation: (NSString*) orientation {
+    pjmedia_orient orient = PJMEDIA_ORIENT_ROTATE_90DEG;
+    
+    if ([orientation isEqualToString:@"PJMEDIA_ORIENT_ROTATE_270DEG"]) {
+        orient = PJMEDIA_ORIENT_ROTATE_270DEG;
+    } else if ([orientation isEqualToString:@"PJMEDIA_ORIENT_ROTATE_180DEG"]) {
+        orient = PJMEDIA_ORIENT_ROTATE_180DEG;
+    } else if ([orientation isEqualToString:@"PJMEDIA_ORIENT_NATURAL"]) {
+        orient = PJMEDIA_ORIENT_NATURAL;
+    }
+    
+    /* Here we set the orientation for all video devices.
+     * This may return failure for renderer devices or for
+     * capture devices which do not support orientation setting,
+     * we can simply ignore them.
+    */
+    for (int i = pjsua_vid_dev_count() - 1; i >= 0; i--) {
+        pjsua_vid_dev_set_setting(i, PJMEDIA_VID_DEV_CAP_ORIENTATION, &orient, PJ_TRUE);
+    }
+}
+
+-(void) changeCodecSettings: (NSDictionary*) codecSettings {
+    
+    for (NSString * key in codecSettings) {
+        pj_str_t codec_id = pj_str((char *) [key UTF8String]);
+        NSNumber * priority = codecSettings[key];
+        pjsua_codec_set_priority(&codec_id, priority);
+    }
+    
+}
 #pragma mark - Events
 
 -(void)emmitRegistrationChanged:(PjSipAccount*) account {
@@ -214,9 +302,14 @@
     [self emmitEvent:@"pjSipCallTerminated" body:[call toJsonDictionary:self.isSpeaker]];
 }
 
+-(void)emmitMessageReceived:(PjSipMessage*) message {
+    [self emmitEvent:@"pjSipMessageReceived" body:[message toJsonDictionary]];
+}
+
 -(void)emmitEvent:(NSString*) name body:(id)body {
     [[self.bridge eventDispatcher] sendAppEventWithName:name body:body];
 }
+
 
 #pragma mark - Callbacks
 
@@ -273,7 +366,51 @@ static void onCallMediaStateChanged(pjsua_call_id callId) {
     }
     
     [endpoint emmitCallChanged:call];
+    
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"PjSipInvalidateVideo"
+                                                        object:nil];
 }
 
+static void onCallMediaEvent(pjsua_call_id call_id,
+                             unsigned med_idx,
+                             pjmedia_event *event) {
+    if (event->type == PJMEDIA_EVENT_FMT_CHANGED) {
+        /* Adjust renderer window size to original video size */
+        pjsua_call_info ci;
+        pjsua_vid_win_id wid;
+        pjmedia_rect_size size;
+        
+        pjsua_call_get_info(call_id, &ci);
+        
+        if ((ci.media[med_idx].type == PJMEDIA_TYPE_VIDEO) &&
+            (ci.media[med_idx].dir & PJMEDIA_DIR_DECODING))
+        {
+            wid = ci.media[med_idx].stream.vid.win_in;
+            size = event->data.fmt_changed.new_fmt.det.vid.size;
+
+            pjsua_vid_win_set_size(wid, &size);
+        }
+    }
+}
+
+static void onMessageReceived(pjsua_call_id call_id, const pj_str_t *from,
+                          const pj_str_t *to, const pj_str_t *contact,
+                          const pj_str_t *mime_type, const pj_str_t *body,
+                          pjsip_rx_data *rdata, pjsua_acc_id acc_id) {
+    PjSipEndpoint* endpoint = [PjSipEndpoint instance];
+    NSDictionary* data = [NSDictionary dictionaryWithObjectsAndKeys:
+                          [NSNull null], @"test",
+                          @(call_id), @"callId",
+                          @(acc_id), @"accountId",
+                          [PjSipUtil toString:contact], @"contactUri",
+                          [PjSipUtil toString:from], @"fromUri",
+                          [PjSipUtil toString:to], @"toUri",
+                          [PjSipUtil toString:body], @"body",
+                          [PjSipUtil toString:mime_type], @"contentType",
+                          nil];
+    PjSipMessage* message = [PjSipMessage itemConfig:data];
+    
+    [endpoint emmitMessageReceived:message];
+}
 
 @end

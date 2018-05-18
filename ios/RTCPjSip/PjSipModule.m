@@ -25,8 +25,6 @@
 }
 
 RCT_EXPORT_METHOD(start: (NSDictionary *) config callback: (RCTResponseSenderBlock) callback) {
-    NSLog(@"start thread%@", [NSThread currentThread]);
-
     [PjSipEndpoint instance].bridge = self.bridge;
 
     NSDictionary *result = [[PjSipEndpoint instance] start];
@@ -45,14 +43,37 @@ RCT_EXPORT_METHOD(deleteAccount: (int) accountId callback:(RCTResponseSenderBloc
     callback(@[@TRUE]);
 }
 
+RCT_EXPORT_METHOD(registerAccount: (int) accountId renew:(BOOL) renew callback:(RCTResponseSenderBlock) callback) {
+    @try {
+        PjSipEndpoint* endpoint = [PjSipEndpoint instance];
+        PjSipAccount *account = [endpoint findAccount:accountId];
+        
+        [account register:renew];
+        
+        callback(@[@TRUE]);
+    }
+    @catch (NSException * e) {
+        callback(@[@FALSE, e.reason]);
+    }
+}
+
 #pragma mark - Call Actions
 
-RCT_EXPORT_METHOD(makeCall: (int) accountId destination: (NSString *) destination callback:(RCTResponseSenderBlock) callback) {
-    PjSipEndpoint* endpoint = [PjSipEndpoint instance];
-    PjSipAccount *account = [endpoint findAccount:accountId];
-    PjSipCall *call = [endpoint makeCall:account destination:destination];
-
-    callback(@[@TRUE, [call toJsonDictionary:endpoint.isSpeaker]]);
+RCT_EXPORT_METHOD(makeCall: (int) accountId destination: (NSString *) destination callSettings:(NSDictionary*) callSettings msgData:(NSDictionary*) msgData callback:(RCTResponseSenderBlock) callback) {
+    @try {
+        PjSipEndpoint* endpoint = [PjSipEndpoint instance];
+        PjSipAccount *account = [endpoint findAccount:accountId];
+        PjSipCall *call = [endpoint makeCall:account destination:destination callSettings:callSettings msgData:msgData];
+        
+        // TODO: Remove this function
+        // Automatically put other calls on hold.
+        [endpoint pauseParallelCalls:call];
+        
+        callback(@[@TRUE, [call toJsonDictionary:endpoint.isSpeaker]]);
+    }
+    @catch (NSException * e) {
+        callback(@[@FALSE, e.reason]);
+    }
 }
 
 RCT_EXPORT_METHOD(hangupCall: (int) callId callback:(RCTResponseSenderBlock) callback) {
@@ -78,10 +99,15 @@ RCT_EXPORT_METHOD(declineCall: (int) callId callback:(RCTResponseSenderBlock) ca
 }
 
 RCT_EXPORT_METHOD(answerCall: (int) callId callback:(RCTResponseSenderBlock) callback) {
-    PjSipCall *call = [[PjSipEndpoint instance] findCall:callId];
+    PjSipEndpoint* endpoint = [PjSipEndpoint instance];
+    PjSipCall *call = [endpoint findCall:callId];
     
     if (call) {
         [call answer];
+        
+        // Automatically put other calls on hold.
+        [endpoint pauseParallelCalls:call];
+        
         callback(@[@TRUE]);
     } else {
         callback(@[@FALSE, @"Call not found"]);
@@ -95,6 +121,7 @@ RCT_EXPORT_METHOD(holdCall: (int) callId callback:(RCTResponseSenderBlock) callb
     if (call) {
         [call hold];
         [endpoint emmitCallChanged:call];
+        
         callback(@[@TRUE]);
     } else {
         callback(@[@FALSE, @"Call not found"]);
@@ -108,6 +135,10 @@ RCT_EXPORT_METHOD(unholdCall: (int) callId callback:(RCTResponseSenderBlock) cal
     if (call) {
         [call unhold];
         [endpoint emmitCallChanged:call];
+        
+        // Automatically put other calls on hold.
+        [endpoint pauseParallelCalls:call];
+        
         callback(@[@TRUE]);
     } else {
         callback(@[@FALSE, @"Call not found"]);
@@ -190,6 +221,30 @@ RCT_EXPORT_METHOD(useSpeaker: (int) callId callback:(RCTResponseSenderBlock) cal
 
 RCT_EXPORT_METHOD(useEarpiece: (int) callId callback:(RCTResponseSenderBlock) callback) {
     [[PjSipEndpoint instance] useEarpiece];
+}
+
+RCT_EXPORT_METHOD(activateAudioSession: (RCTResponseSenderBlock) callback) {
+    pjsua_set_no_snd_dev();
+    pj_status_t status;
+    status = pjsua_set_snd_dev(PJMEDIA_AUD_DEFAULT_CAPTURE_DEV, PJMEDIA_AUD_DEFAULT_PLAYBACK_DEV);
+    if (status != PJ_SUCCESS) {
+        NSLog(@"Failed to active audio session");
+    }
+}
+
+RCT_EXPORT_METHOD(deactivateAudioSession: (RCTResponseSenderBlock) callback) {
+    pjsua_set_no_snd_dev();
+}
+
+#pragma mark - Settings
+
+RCT_EXPORT_METHOD(changeOrientation: (NSString*) orientation) {
+    [[PjSipEndpoint instance] changeOrientation:orientation];
+}
+
+RCT_EXPORT_METHOD(changeCodecSettings: (NSDictionary*) codecSettings callback:(RCTResponseSenderBlock) callback) {
+    [[PjSipEndpoint instance] changeCodecSettings:codecSettings];
+    callback(@[@TRUE]);
 }
 
 RCT_EXPORT_MODULE();

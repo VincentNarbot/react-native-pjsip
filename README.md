@@ -4,9 +4,10 @@ A [PJSIP](http://www.pjsip.org/) module for React Native.
 
 ## Support
 - Currently support for iOS and Android.  
-- Support ~~video~~ and audio communication.
+- Support video and audio communication.
+- Ability to use Callkit and PushNotifications.
 - You can use it to build an iOS/Android app that can communicate with SIP server.
-- Android version is based on [pjsip-android-builder](https://github.com/VoiSmart/pjsip-android-builder) (minimal Android API verion is 21)
+- Android version is based on [react-native-pjsip-builder](https://github.com/datso/react-native-pjsip-builder)
 - iOS version is based on [Vialer-pjsip-iOS](https://github.com/VoIPGRID/Vialer-pjsip-iOS)
 
 ## Installation
@@ -52,6 +53,10 @@ let configuration = {
   "transport": null, // Default TCP
   "regServer": null, // Default wildcard
   "regTimeout": null // Default 3600
+  "regHeaders": {
+    "X-Custom-Header": "Value"
+  },
+  "regContactParams": ";unique-device-token-id=XXXXXXXXX"
 };
 endpoint.createAccount().then((account) => {
   console.log("Account created", account);

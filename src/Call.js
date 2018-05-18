@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * This class describes the information and current status of a call.
  */
@@ -11,7 +9,7 @@ export default class Call {
             state, stateText, held, muted, speaker,
             connectDuration, totalDuration,
             remoteOfferer, remoteAudioCount, remoteVideoCount, audioCount, videoCount,
-            lastStatusCode, lastReason
+            lastStatusCode, lastReason, media, provisionalMedia
         }) {
         let remoteNumber = null;
         let remoteName = null;
@@ -54,6 +52,9 @@ export default class Call {
         this._videoCount = videoCount;
         this._lastStatusCode = lastStatusCode;
         this._lastReason = lastReason;
+
+        this._media = media;
+        this._provisionalMedia = provisionalMedia;
 
         this._constructionTime = Math.round(new Date().getTime() / 1000);
     }
@@ -356,6 +357,14 @@ export default class Call {
      */
     getLastReason() {
         return this._lastReason;
+    }
+
+    getMedia() {
+        return this._media;
+    }
+
+    getProvisionalMedia() {
+        return this._provisionalMedia;
     }
 
     /**

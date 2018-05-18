@@ -24,28 +24,32 @@
 
 #pragma mark - Actions
 
-- (void)hangup {
+- (void) hangup {
     pj_status_t status = pjsua_call_hangup(self.id, 0, NULL, NULL);
     
     if (status != PJ_SUCCESS) {
         NSLog(@"Failed to hangup a call (%d)", status);
-    } else {
-        NSLog(@"Hangup success");
     }
 }
 
-- (void)decline {
+- (void) decline {
     pjsua_call_hangup(self.id, PJSIP_SC_DECLINE, NULL, NULL);
 }
 
 
 - (void)answer {
+    // TODO: Add parameters to answer with
     // TODO: Put on hold previous call
     
     pjsua_msg_data msgData;
     pjsua_msg_data_init(&msgData);
     pjsua_call_setting  callOpt;
     pjsua_call_setting_default(&callOpt);
+    
+    // TODO: Audio/Video count configuration!
+    callOpt.aud_cnt = 1;
+    callOpt.vid_cnt = 1;
+    
     pjsua_call_answer2(self.id, &callOpt, 200, NULL, &msgData);
 }
 
@@ -75,18 +79,34 @@
     pjsua_call_info info;
     pjsua_call_get_info(self.id, &info);
     
-    pjsua_conf_adjust_rx_level(info.conf_slot, 0);
-    
-    self.isMuted = true;
+    @try {
+        if( info.conf_slot != 0 ) {
+            NSLog(@"WC_SIPServer microphone disconnected from call");
+            pjsua_conf_disconnect(0, info.conf_slot);
+            
+            self.isMuted = true;
+        }
+    }
+    @catch (NSException *exception) {
+        NSLog(@"Unable to mute microphone: %@", exception);
+    }
 }
 
 - (void)unmute {
     pjsua_call_info info;
     pjsua_call_get_info(self.id, &info);
     
-    pjsua_conf_adjust_rx_level(info.conf_slot, 1);
-    
-    self.isMuted = false;
+    @try {
+        if( info.conf_slot != 0 ) {
+            NSLog(@"WC_SIPServer microphone reconnected to call");
+            pjsua_conf_connect(0, info.conf_slot);
+            
+            self.isMuted = false;
+        }
+    }
+    @catch (NSException *exception) {
+        NSLog(@"Unable to un-mute microphone: %@", exception);
+    }
 }
 
 - (void)xfer:(NSString*) destination {
@@ -122,11 +142,14 @@
 #pragma mark - Callback methods
 
 - (void)onStateChanged:(pjsua_call_info)info {
-    // TODO ?
+    // Ignore
 }
 
+/**
+ * The action may connect the call to sound device, to file, or
+ * to loop the call.
+ */
 - (void)onMediaStateChanged:(pjsua_call_info)info {
-    // TODO: Description why this needed
     pjsua_call_media_status status = info.media_status;
     
     if (status == PJSUA_CALL_MEDIA_ACTIVE || status == PJSUA_CALL_MEDIA_REMOTE_HOLD) {
@@ -175,9 +198,36 @@
         @"remoteVideoCount": @(info.rem_vid_cnt),
         
         @"audioCount": @(info.setting.aud_cnt),
-        @"videoCount": @(info.setting.vid_cnt)
+        @"videoCount": @(info.setting.vid_cnt),
+        
+        @"media": [self mediaInfoToJsonArray:info.media count:info.media_cnt],
+        @"provisionalMedia": [self mediaInfoToJsonArray:info.prov_media count:info.prov_media_cnt]
     };
 }
 
+- (NSArray *)mediaInfoToJsonArray: (pjsua_call_media_info[]) info count:(int) count {
+    NSMutableArray * result = [NSMutableArray array];
+    
+    for (int i = 0; i < count; i++) {
+        [result addObject:[self mediaToJsonDictionary:info[i]]];
+    }
+    
+    return result;
+}
+
+- (NSDictionary *)mediaToJsonDictionary:(pjsua_call_media_info) info {
+    return @{
+        @"dir": [PjSipUtil mediaDirToString:info.dir],
+        @"type": [PjSipUtil mediaTypeToString:info.type],
+        @"status": [PjSipUtil mediaStatusToString:info.status],
+        @"audioStream": @{
+            @"confSlot": @(info.stream.aud.conf_slot)
+        },
+        @"videoStream": @{
+            @"captureDevice": @(info.stream.vid.cap_dev),
+            @"windowId": @(info.stream.vid.win_in),
+        }
+    };
+}
 
 @end

@@ -1,8 +1,11 @@
 package com.carusto.ReactNativePjSip;
 
-import com.carusto.ReactNativePjSip.configuration.AccountConfiguration;
+import com.carusto.ReactNativePjSip.dto.AccountConfigurationDTO;
 import org.json.JSONObject;
-import org.pjsip.pjsua2.*;
+import org.pjsip.pjsua2.Account;
+import org.pjsip.pjsua2.OnIncomingCallParam;
+import org.pjsip.pjsua2.OnInstantMessageParam;
+import org.pjsip.pjsua2.OnRegStateParam;
 
 public class PjSipAccount extends Account {
 
@@ -15,14 +18,18 @@ public class PjSipAccount extends Account {
 
     private PjSipService service;
 
-    private AccountConfiguration configuration;
+    private AccountConfigurationDTO configuration;
 
     private Integer transportId;
 
-    public PjSipAccount(PjSipService service, int transportId, AccountConfiguration configuration) {
+    public PjSipAccount(PjSipService service, int transportId, AccountConfigurationDTO configuration) {
         this.service = service;
         this.transportId = transportId;
         this.configuration = configuration;
+    }
+
+    public void register(boolean renew) throws Exception {
+        setRegistration(renew);
     }
 
     public PjSipService getService() {
@@ -33,7 +40,7 @@ public class PjSipAccount extends Account {
         return transportId;
     }
 
-    public AccountConfiguration getConfiguration() {
+    public AccountConfigurationDTO getConfiguration() {
         return configuration;
     }
 
@@ -57,6 +64,12 @@ public class PjSipAccount extends Account {
         service.emmitCallReceived(this, call);
     }
 
+    @Override
+    public void onInstantMessage(OnInstantMessageParam prm) {
+        PjSipMessage message = new PjSipMessage(this, prm);
+        service.emmitMessageReceived(this, message);
+    }
+
     public JSONObject toJson() {
         JSONObject json = new JSONObject();
 
@@ -75,8 +88,16 @@ public class PjSipAccount extends Account {
             json.put("password", configuration.getPassword());
             json.put("proxy", configuration.getProxy());
             json.put("transport", configuration.getTransport());
+
+            json.put("contactParams", configuration.getContactParams());
+            json.put("contactUriParams", configuration.getContactUriParams());
+
             json.put("regServer", configuration.getRegServer());
             json.put("regTimeout", configuration.isRegTimeoutNotEmpty() ? String.valueOf(configuration.getRegTimeout()) : "");
+            json.put("regContactParams", configuration.getRegContactParams());
+            json.put("regHeaders", configuration.getRegHeaders());
+            json.put("regOnAdd", configuration.isRegOnAdd());
+
             json.put("registration", registration);
 
             return json;

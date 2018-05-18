@@ -3,9 +3,19 @@ package com.carusto.ReactNativePjSip;
 import android.content.Context;
 import android.content.Intent;
 
+import android.os.Bundle;
+
 import android.util.Log;
+
+import com.carusto.ReactNativePjSip.dto.CallSettingsDTO;
+import com.carusto.ReactNativePjSip.dto.SipMessageDTO;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableMapKeySetIterator;
+
+import java.io.Serializable;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Arrays;
 
 public class PjActions {
 
@@ -13,6 +23,8 @@ public class PjActions {
 
     public static final String ACTION_START = "start";
     public static final String ACTION_CREATE_ACCOUNT = "account_create";
+    public static final String ACTION_CHANGE_CODEC_SETTINGS= "change_codec_settings'";
+    public static final String ACTION_REGISTER_ACCOUNT = "account_register";
     public static final String ACTION_DELETE_ACCOUNT = "account_delete";
     public static final String ACTION_MAKE_CALL = "call_make";
     public static final String ACTION_HANGUP_CALL = "call_hangup";
@@ -29,7 +41,6 @@ public class PjActions {
     public static final String ACTION_REDIRECT_CALL = "call_redirect";
     public static final String ACTION_DTMF_CALL = "call_dtmf";
 
-    public static final String ACTION_SET_NETWORK_CONFIGURATION = "set_network_configuration";
     public static final String ACTION_SET_SERVICE_CONFIGURATION = "set_service_configuration";
 
     public static final String EVENT_STARTED = "com.carusto.account.started";
@@ -39,29 +50,15 @@ public class PjActions {
     public static final String EVENT_CALL_TERMINATED = "com.carusto.call.terminated";
     public static final String EVENT_CALL_RECEIVED = "com.carusto.call.received";
     public static final String EVENT_CALL_SCREEN_LOCKED = "com.carusto.call.screen.locked";
+    public static final String EVENT_MESSAGE_RECEIVED = "com.carusto.message.received";
     public static final String EVENT_HANDLED = "com.carusto.handled";
-
-    public static final String EVENT_APP_VISIBLE = "com.carusto.app.visible";
-    public static final String EVENT_APP_HIDDEN = "com.carusto.app.hidden";
-    public static final String EVENT_APP_DESTROY = "com.carusto.app.destroy";
-    public static final String EVENT_CONNECTIVITY_CHANGED = "com.carusto.connectivity.changed";
 
     public static Intent createStartIntent(int callbackId, ReadableMap configuration, Context context) {
         Intent intent = new Intent(context, PjSipService.class);
         intent.setAction(PjActions.ACTION_START);
         intent.putExtra("callback_id", callbackId);
 
-        overrideIntentProps(intent, configuration);
-
-        return intent;
-    }
-
-    public static Intent createSetNetworkConfigurationIntent(int callbackId, ReadableMap configuration, Context context) {
-        Intent intent = new Intent(context, PjSipService.class);
-        intent.setAction(PjActions.ACTION_SET_NETWORK_CONFIGURATION);
-        intent.putExtra("callback_id", callbackId);
-
-        overrideIntentProps(intent, configuration);
+        formatIntent(intent, configuration);
 
         return intent;
     }
@@ -71,7 +68,7 @@ public class PjActions {
         intent.setAction(PjActions.ACTION_SET_SERVICE_CONFIGURATION);
         intent.putExtra("callback_id", callbackId);
 
-        overrideIntentProps(intent, configuration);
+        formatIntent(intent, configuration);
 
         return intent;
     }
@@ -81,7 +78,17 @@ public class PjActions {
         intent.setAction(PjActions.ACTION_CREATE_ACCOUNT);
         intent.putExtra("callback_id", callbackId);
 
-        overrideIntentProps(intent, configuration);
+        formatIntent(intent, configuration);
+
+        return intent;
+    }
+
+    public static Intent createAccountRegisterIntent(int callbackId, int accountId, boolean renew, Context context) {
+        Intent intent = new Intent(context, PjSipService.class);
+        intent.setAction(PjActions.ACTION_REGISTER_ACCOUNT);
+        intent.putExtra("callback_id", callbackId);
+        intent.putExtra("account_id", accountId);
+        intent.putExtra("renew", renew);
 
         return intent;
     }
@@ -95,12 +102,20 @@ public class PjActions {
         return intent;
     }
 
-    public static Intent createMakeCallIntent(int callbackId, int accountId, String destination, Context context) {
+    public static Intent createMakeCallIntent(int callbackId, int accountId, String destination, ReadableMap settings, ReadableMap message, Context context) {
         Intent intent = new Intent(context, PjSipService.class);
         intent.setAction(PjActions.ACTION_MAKE_CALL);
         intent.putExtra("callback_id", callbackId);
         intent.putExtra("account_id", accountId);
         intent.putExtra("destination", destination);
+
+        if (settings != null) {
+            intent.putExtra("settings", CallSettingsDTO.fromReadableMap(settings).toJson());
+        }
+
+        if (message != null) {
+            intent.putExtra("message", SipMessageDTO.fromReadableMap(message).toJson());
+        }
 
         return intent;
     }
@@ -226,25 +241,17 @@ public class PjActions {
         return intent;
     }
 
-    public static Intent createConnectivityChangedIntent(Context context) {
+    public static Intent createChangeCodecSettingsIntent(int callbackId, ReadableMap codecSettings, Context context) {
         Intent intent = new Intent(context, PjSipService.class);
-        intent.setAction(PjActions.EVENT_CONNECTIVITY_CHANGED);
+        intent.setAction(PjActions.ACTION_CHANGE_CODEC_SETTINGS);
+        intent.putExtra("callback_id", callbackId);
+
+        formatIntent(intent, codecSettings);
+
         return intent;
     }
 
-    public static Intent createAppVisibleIntent(Context context) {
-        Intent intent = new Intent(context, PjSipService.class);
-        intent.setAction(PjActions.EVENT_APP_VISIBLE);
-        return intent;
-    }
-
-    public static Intent createAppHiddenIntent(Context context) {
-        Intent intent = new Intent(context, PjSipService.class);
-        intent.setAction(PjActions.EVENT_APP_HIDDEN);
-        return intent;
-    }
-
-    private static void overrideIntentProps(Intent intent, ReadableMap configuration) {
+    private static void formatIntent(Intent intent, ReadableMap configuration) {
         if (configuration == null) {
             return;
         }
@@ -266,6 +273,9 @@ public class PjActions {
                 case Boolean:
                     intent.putExtra(key, configuration.getBoolean(key));
                     break;
+                case Map:
+                    intent.putExtra(key, (Serializable) formatMap(configuration.getMap(key)));
+                    break;
                 default:
                     Log.w(TAG, "Unable to put extra information for intent: unknown type \""+ configuration.getType(key) +"\"");
                     break;
@@ -273,4 +283,38 @@ public class PjActions {
         }
     }
 
+    private static Map<String, Object> formatMap(ReadableMap map) {
+        Map<String, Object> value = new HashMap<>();
+        ReadableMapKeySetIterator mapIt = map.keySetIterator();
+
+        while (mapIt.hasNextKey()) {
+            String mapKey = mapIt.nextKey();
+
+            switch (map.getType(mapKey)) {
+                case Null:
+                    value.put(mapKey, null);
+                    break;
+                case String:
+                    value.put(mapKey, map.getString(mapKey));
+                    break;
+                case Number:
+                    value.put(mapKey, map.getInt(mapKey));
+                    break;
+                case Boolean:
+                    value.put(mapKey, map.getBoolean(mapKey));
+                    break;
+                case Array:
+                    value.put(mapKey, map.getArray(mapKey).toArrayList());
+                    break;
+                case Map:
+                    value.put(mapKey, formatMap(map.getMap(mapKey)));
+                    break;
+                default:
+                    Log.w(TAG, "Unable to put extra information for intent: unknown type \""+ map.getType(mapKey) +"\"");
+                    break;
+            }
+        }
+
+        return value;
+    }
 }
